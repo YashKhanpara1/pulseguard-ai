@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PulseGuard AI | Real-Time API Anomaly & Drift Monitor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans">
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <!-- Top Bar -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-5">
+      <div>
+        <div class="flex items-center gap-3">
+          <span class="h-3 w-3 rounded-full bg-emerald-400 animate-pulse"></span>
+          <h1 class="text-2xl font-bold tracking-tight text-white">PulseGuard AI</h1>
+          <span class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            IsolationForest + KS-Drift + Redis + PostgreSQL
+          </span>
+        </div>
+        <p class="text-slate-400 text-sm mt-1">Real-Time Telemetry Anomaly Detection & Statistical Data Drift Engine</p>
+      </div>
+
+      <!-- Recruiter / Live Demo Action Buttons -->
+      <div class="flex flex-wrap gap-2">
+        <button onclick="simulate('normal', 5)" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+          + Normal Traffic (5)
+        </button>
+        <button onclick="simulate('anomaly', 1)" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-950/50 transition">
+          ⚡ Inject Anomaly Spike
+        </button>
+        <button onclick="simulate('drift', 25)" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-950/50 transition">
+          📉 Simulate Data Drift (25)
+        </button>
+        <button onclick="simulate('reset', 1)" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white transition">
+          ↺ Reset Baseline
+        </button>
+        <a href="/docs" target="_blank" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition">
+          Swagger API ↗
+        </a>
+      </div>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-6">
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-400">Events Processed</p>
+        <p id="kpi-total" class="text-2xl font-bold mt-1 text-white">0</p>
+      </div>
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-400">Anomalies Caught</p>
+        <p id="kpi-anomalies" class="text-2xl font-bold mt-1 text-rose-400">0</p>
+      </div>
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-400">P95 Latency (Window)</p>
+        <p id="kpi-p95" class="text-2xl font-bold mt-1 text-sky-400">0 ms</p>
+      </div>
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-400">Window Error Rate</p>
+        <p id="kpi-err" class="text-2xl font-bold mt-1 text-amber-400">0%</p>
+      </div>
+      <div id="drift-card" class="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs uppercase tracking-wider text-slate-400">KS-Test Drift Score</p>
+        <p id="kpi-drift" class="text-2xl font-bold mt-1 text-emerald-400">0.00</p>
+        <p id="kpi-drift-status" class="text-xs text-slate-400 mt-0.5 truncate">Distribution Stable</p>
+      </div>
+    </div>
+
+    <!-- Main Chart + Live Incident Feed -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+      <!-- Time-Series Latency Chart -->
+      <div class="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-sm font-semibold text-slate-200">Live API Latency Stream (ms) — Red Points = ML Anomalies</h2>
+          <span id="ws-badge" class="text-xs text-emerald-400">● Live Stream Connected</span>
+        </div>
+        <div class="h-72">
+          <canvas id="latencyChart"></canvas>
+        </div>
+      </div>
+
+      <!-- PostgreSQL Incident Audit Log -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-5 flex flex-col">
+        <h2 class="text-sm font-semibold text-slate-200 mb-3">PostgreSQL Incident Audit Log</h2>
+        <div id="incident-list" class="space-y-2.5 overflow-y-auto max-h-72 pr-1 text-xs">
+          <p class="text-slate-500">Loading incidents...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const ctx = document.getElementById('latencyChart').getContext('2d');
+    const latencyChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Latency (ms)',
+          data: [],
+          borderColor: '#38bdf8',
+          backgroundColor: 'rgba(56, 189, 248, 0.12)',
+          borderWidth: 2,
+          tension: 0.3,
+          fill: true,
+          pointRadius: [],
+          pointBackgroundColor: []
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 200 },
+        scales: {
+          x: { ticks: { color: '#94a3b8', maxTicksLimit: 10 }, grid: { color: '#1e293b' } },
+          y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' }, beginAtZero: true }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+
+    async function refreshOverview() {
+      const res = await fetch('/api/v1/overview');
+      const data = await res.json();
+
+      document.getElementById('kpi-total').textContent = data.metrics.total_events;
+      document.getElementById('kpi-anomalies').textContent = data.metrics.total_anomalies;
+      document.getElementById('kpi-p95').textContent = `${data.metrics.p95_latency_ms} ms`;
+      document.getElementById('kpi-err').textContent = `${data.metrics.error_rate_pct}%`;
+
+      const driftEl = document.getElementById('kpi-drift');
+      const driftStatusEl = document.getElementById('kpi-drift-status');
+      const driftCard = document.getElementById('drift-card');
+      driftEl.textContent = data.drift.drift_score.toFixed(3);
+      driftStatusEl.textContent = data.drift.status;
+
+      if (data.drift.drift_detected) {
+        driftEl.className = 'text-2xl font-bold mt-1 text-amber-400';
+        driftCard.className = 'bg-amber-950/30 border border-amber-500/50 rounded-xl p-4';
+      } else {
+        driftEl.className = 'text-2xl font-bold mt-1 text-emerald-400';
+        driftCard.className = 'bg-slate-900/90 border border-slate-800 rounded-xl p-4';
+      }
+
+      // Update Chart
+      latencyChart.data.labels = data.window.map(e => e.timestamp);
+      latencyChart.data.datasets[0].data = data.window.map(e => e.latency_ms);
+      latencyChart.data.datasets[0].pointRadius = data.window.map(e => e.is_anomaly ? 6 : 2.5);
+      latencyChart.data.datasets[0].pointBackgroundColor = data.window.map(e => e.is_anomaly ? '#f43f5e' : '#38bdf8');
+      latencyChart.update();
+
+      // Update Incident Feed
+      const listEl = document.getElementById('incident-list');
+      if (!data.incidents.length) {
+        listEl.innerHTML = '<p class="text-slate-500">No anomalies recorded yet. Click "Inject Anomaly Spike" to test!</p>';
+      } else {
+        listEl.innerHTML = data.incidents.map(inc => `
+          <div class="p-3 rounded-lg bg-slate-950 border border-rose-500/30">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-rose-400">${inc.service_name}</span>
+              <span class="text-slate-500">Risk: ${inc.risk_score}</span>
+            </div>
+            <p class="text-slate-300 mt-1">${inc.reason}</p>
+            <p class="text-slate-500 mt-1">${inc.endpoint} • HTTP ${inc.status_code} • ${inc.latency_ms}ms</p>
+          </div>
+        `).join('');
+      }
+    }
+
+    async function simulate(mode, count) {
+      await fetch('/api/v1/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, count })
+      });
+      await refreshOverview();
+    }
+
+    // WebSocket listener for real-time updates
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${window.location.host}/ws/stream`);
+    ws.onmessage = () => refreshOverview();
+    ws.onclose = () => {
+      document.getElementById('ws-badge').textContent = '● Polling Mode';
+      document.getElementById('ws-badge').className = 'text-xs text-amber-400';
+    };
+
+    refreshOverview();
+  </script>
+</body>
+</html>
